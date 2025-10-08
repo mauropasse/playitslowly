@@ -1,3 +1,5 @@
+import gi
+gi.require_version('Gtk','3.0')
 #!/usr/bin/env python3
 # vim: set fileencoding=utf-8 :
 """
@@ -35,13 +37,11 @@ gi.require_version('Gst', '1.0')
 
 from gi.repository import Gtk, GObject, Gst, Gio, Gdk
 
-GObject.threads_init()
 Gst.init(None)
 
 from playitslowly.pipeline import Pipeline
 
 # always enable button images
-Gtk.Settings.get_default().set_long_property("gtk-button-images", True, "main")
 
 from playitslowly import myGtk
 myGtk.install()
@@ -90,7 +90,7 @@ class Config(dict):
 
 class MainWindow(Gtk.Window):
     def __init__(self, sink, config):
-        Gtk.Window.__init__(self, Gtk.WindowType.TOPLEVEL)
+        Gtk.Window.__init__(self, type=Gtk.WindowType.TOPLEVEL)
 
         self.set_title(NAME)
 
@@ -115,7 +115,7 @@ class MainWindow(Gtk.Window):
         self.filechooser = Gtk.FileChooserButton.new_with_dialog(self.filedialog)
         self.filechooser.set_local_only(False)
         filechooserhbox.pack_start(self.filechooser, True, True, 0)
-        self.recentbutton = Gtk.Button(_("Recent"))
+        self.recentbutton = Gtk.Button(label=_("Recent"))
         self.recentbutton.connect("clicked", self.show_recent)
         filechooserhbox.pack_end(self.recentbutton, False, False, 0)
 
@@ -162,14 +162,14 @@ class MainWindow(Gtk.Window):
         myGtk.add_style_class(buttonbox, 'buttonBox')
         self.vbox.pack_end(buttonbox, False, False, 0)
 
-        self.play_button = Gtk.ToggleButton(stock=Gtk.STOCK_MEDIA_PLAY)
+        self.play_button = Gtk.ToggleButton(label='Play')
         self.play_button.connect("toggled", self.play)
-        self.play_button.set_use_stock(True)
+
         self.play_button.set_sensitive(False)
         buttonbox.pack_start(self.play_button, True, True, 0)
         self.play_button.add_accelerator("clicked", self.accel_group, ord(' '), 0, Gtk.AccelFlags.VISIBLE)
 
-        self.back_button = Gtk.Button.new_from_stock(Gtk.STOCK_MEDIA_REWIND)
+        self.back_button = Gtk.Button.new_with_mnemonic('Rewind')
         self.back_button.connect("clicked", self.back)
         #self.back_button.set_use_stock(True)
         self.back_button.set_sensitive(False)
@@ -181,12 +181,12 @@ class MainWindow(Gtk.Window):
         self.volume_button.connect("value-changed", self.volumechanged)
         buttonbox.pack_start(self.volume_button, True, True, 0)
 
-        self.save_as_button = Gtk.Button.new_from_stock(Gtk.STOCK_SAVE_AS)
+        self.save_as_button = Gtk.Button.new_with_mnemonic('Save As')
         self.save_as_button.connect("clicked", self.save)
         self.save_as_button.set_sensitive(False)
         buttonbox.pack_start(self.save_as_button, True, True, 0)
 
-        button_about = Gtk.Button.new_from_stock(Gtk.STOCK_ABOUT)
+        button_about = Gtk.Button.new_with_mnemonic("About")
         button_about.connect("clicked", self.about)
         buttonbox.pack_end(button_about, True, True, 0)
 
@@ -515,8 +515,8 @@ def main():
     style_provider.load_from_data(css)
 
     Gtk.StyleContext.add_provider_for_screen(
-        Gdk.Screen.get_default(), 
-        style_provider,     
+        Gdk.Screen.get_default(),
+        style_provider,
         Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
     )
 

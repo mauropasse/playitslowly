@@ -26,12 +26,12 @@ import collections
 
 _ = lambda s: s
 
-buttons_ok_cancel = (Gtk.STOCK_CANCEL,Gtk.ResponseType.CANCEL,Gtk.STOCK_OPEN,Gtk.ResponseType.OK)
+buttons_ok_cancel = ('Cancel',Gtk.ResponseType.CANCEL,'Open',Gtk.ResponseType.OK)
 class FileChooserDialog(Gtk.FileChooserDialog):
     """a file chooser dialog which automatically sets the correct buttons!"""
     def __init__(self, title=None, parent=None, action=None):
         if action == Gtk.FileChooserAction.SAVE:
-            buttons = (Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL, Gtk.STOCK_SAVE ,Gtk.ResponseType.OK)
+            buttons = ('Cancel', Gtk.ResponseType.CANCEL, 'Save' ,Gtk.ResponseType.OK)
             title = title or _("Save File")
         else:
             if action == Gtk.FileChooserAction.SELECT_FOLDER:
@@ -40,7 +40,7 @@ class FileChooserDialog(Gtk.FileChooserDialog):
                 title = title or _("Create Folder")
             else:
                 title = title or _("Open a File")
-            buttons = (Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL, Gtk.STOCK_OPEN ,Gtk.ResponseType.OK)
+            buttons = ('Cancel', Gtk.ResponseType.CANCEL, 'Open' ,Gtk.ResponseType.OK)
         Gtk.FileChooserDialog.__init__(self, title, parent, action, buttons)
 
 class IconFactory:
