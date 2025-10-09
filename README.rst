@@ -15,6 +15,23 @@ About
 transcribing music. It allows you to play a piece of music
 at a different speed or pitch.
 
+New in this version:
+--------------------
+- **Waveform Display:**
+  - The main window now shows a detailed waveform of the loaded track.
+  - You can zoom, scroll, and select regions directly on the waveform.
+  - The playback position and selection are visually indicated.
+
+Dependencies
+============
+* Python 3.4 or newer
+* PyGI (Python GObject Introspection)
+* GTK3
+* gstreamer 1.0 including the soundtouch/pitch element (included in gstreamer-plugins-bad)
+* **pydub** (for waveform extraction)
+* **numpy** (for waveform processing)
+* **ffmpeg** (required by pydub for audio decoding)
+
 
 Shortcuts
 =========
@@ -39,26 +56,54 @@ You can also use other sinks than alsa.
 
 Generic Installation
 ====================
-To install use you need to have the following libraries installed:
+To install, you need the following libraries and tools:
 
  * Python 3.4 or newer
  * PyGI (Python GObject Introspection)
  * GTK3
- * gstreamer 1.0 including the soundtouch/pitch element
-   (included in gstreamer-plugins-bad)
+ * gstreamer 1.0 including the soundtouch/pitch element (included in gstreamer-plugins-bad)
+ * **pydub** and **numpy** (for waveform display)
+ * **ffmpeg** (required by pydub)
 
-Normally these libraries are already installed on your system.
+Install Python dependencies (recommended):
 
-To install play it slowly execute: ``python setup.py install`` as 
-superuser (root). If you are using a gnome based system like Ubuntu
-you can just doubleclick ``install.sh`` and select run.
+.. code-block:: bash
 
+  pip install -r requirements.txt
+
+Install system dependencies (Debian/Ubuntu):
+
+.. code-block:: bash
+
+  sudo apt install ffmpeg python3-gi python3-gi-cairo gir1.2-gtk-3.0 gstreamer1.0-plugins-bad
+
+Then install Play it Slowly:
+
+.. code-block:: bash
+
+  python3 setup.py install
+
+Or, on GNOME-based systems, double-click ``install.sh`` and select run.
+
+
+
+Waveform Feature Details
+========================
+The waveform display uses pydub and numpy to extract and render a detailed min/max envelope of the audio file. It supports most common audio formats (WAV, MP3, FLAC, OGG, AAC, etc.) as long as ffmpeg is installed.
+
+You can:
+ * Zoom in/out on the waveform with the mouse wheel
+ * Drag start/end markers to select a region
+ * Click the "Zoom Selection" button to focus on your selection
+ * See the current playback position as a moving line
+
+If you encounter issues with waveform display, ensure you have installed pydub, numpy, and ffmpeg.
 
 Hacking
 =======
 The source code of play it slowly is hosted on github:
 
-http://github.com/jwagner/playitslowly
+https://github.com/jwagner/playitslowly
 
 If you have any questions or a patch just drop me a mail
 or fill a pull request on github.

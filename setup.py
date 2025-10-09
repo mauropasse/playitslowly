@@ -43,32 +43,36 @@ def ls_r(dir):
         return a
     return reduce(do_reduce, os.walk(dir), [])
 
+
+# Added in 2025: Waveform display feature (requires pydub, numpy, ffmpeg)
 kwargs = {
-      'cmdclass': {'install': new_install},
-      'name': 'playitslowly',
-      'version': "1.5.1",
-      'description': 'A tool to help you when transcribing music. It allows you to play a piece of music at a different speed or pitch.',
-      'author': 'Jonas Wagner',
-      'author_email': 'jonas@29a.ch',
-      'url': 'http://29a.ch/playitslowly/',
-      'packages': ['playitslowly'],
-      'scripts': ['bin/playitslowly'],
-      'options': {'py2exe':{
-          'packages': 'encodings',
-          'includes': 'cairo, pango, pangocairo, atk, gobject',
-          'dist_dir': 'dist/win32',
-          'optimize': 2,
-          }},
-      'data_files': ls_r('share'),
-      'license': 'GNU GPL v3',
-      'classifiers': [
-        'Environment :: X11 Applications :: GTK',
-        'Intended Audience :: End Users/Desktop',
-        'License :: OSI Approved :: GNU General Public License (GPL)',
-        'Natural Language :: English',
-        'Operating System :: POSIX',
-        'Programming Language :: Python',
-        ]
+            'cmdclass': {'install': new_install},
+            'name': 'playitslowly',
+            'version': "1.5.1",
+            'description': 'A tool to help you when transcribing music. It allows you to play a piece of music at a different speed or pitch. Now includes a waveform display (requires pydub, numpy, ffmpeg).',
+            'author': 'Jonas Wagner',
+            'author_email': 'jonas@29a.ch',
+            'url': 'http://29a.ch/playitslowly/',
+            'packages': ['playitslowly'],
+            'scripts': ['bin/playitslowly'],
+            'options': {'py2exe':{
+                    'packages': 'encodings',
+                    'includes': 'cairo, pango, pangocairo, atk, gobject',
+                    'dist_dir': 'dist/win32',
+                    'optimize': 2,
+                    }},
+            'data_files': ls_r('share'),
+            'license': 'GNU GPL v3',
+            'classifiers': [
+                'Environment :: X11 Applications :: GTK',
+                'Intended Audience :: End Users/Desktop',
+                'License :: OSI Approved :: GNU General Public License (GPL)',
+                'Natural Language :: English',
+                'Operating System :: POSIX',
+                'Programming Language :: Python',
+                ],
+            # Not all distutils support install_requires, but document here:
+            # 'install_requires': ['pydub', 'numpy'],
 }
 
 try:
