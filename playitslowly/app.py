@@ -41,6 +41,9 @@ Gst.init(None)
 
 from playitslowly.pipeline import Pipeline
 
+import logging
+logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
+
 # always enable button images
 
 from playitslowly import myGtk
@@ -106,8 +109,50 @@ class MainWindow(Gtk.Window):
         self.accel_group = Gtk.AccelGroup()
         self.add_accel_group(self.accel_group)
 
+
         self.pipeline = Pipeline(sink)
 
+        # --- Waveform Drawing Area ---
+        self.waveform_area = Gtk.DrawingArea()
+        self.waveform_area.set_size_request(600, 100)
+        self.waveform_area.connect("draw", self.on_waveform_draw)
+        self.waveform_samples = None
+        self.waveform_loaded = False
+        self.waveform_view_start = 0.0   # fraction of total waveform (0.0–1.0)
+        self.waveform_view_end = 1.0     # fraction of total waveform (0.0–1.0)
+        self.vbox.pack_start(self.waveform_area, False, False, 4)
+
+        # --- Enable mouse interaction on waveform ---
+        self.waveform_area.add_events(
+            Gdk.EventMask.BUTTON_PRESS_MASK
+            | Gdk.EventMask.BUTTON_RELEASE_MASK
+            | Gdk.EventMask.POINTER_MOTION_MASK
+        )
+        self.waveform_area.connect("button-press-event", self.on_waveform_click)
+        self.waveform_area.connect("button-release-event", self.on_waveform_release)
+        self.waveform_area.connect("motion-notify-event", self.on_waveform_motion)
+
+        # Add mouse wheel zoom
+        self.waveform_area.add_events(Gdk.EventMask.SCROLL_MASK)
+        self.waveform_area.connect("scroll-event", self.on_waveform_scroll)
+
+        # Zoom control button
+        self.zoom_button = Gtk.Button(label="Zoom Selection")
+        self.zoom_button.connect("clicked", self.on_zoom_selection)
+        self.vbox.pack_start(self.zoom_button, False, False, 4)
+
+        # --- Waveform Height Zoom ---
+        self.waveform_height_scale = Gtk.Scale.new_with_range(
+            Gtk.Orientation.HORIZONTAL, 0.5, 3.0, 0.1
+        )
+        self.waveform_height_scale.set_value(1.0)
+        self.waveform_height_scale.set_digits(1)
+        self.waveform_height_scale.connect("value-changed", lambda w: self.waveform_area.queue_draw())
+        self.vbox.pack_start(self.waveform_height_scale, False, False, 2)
+
+        self.dragging_marker = None  # "start", "end" or None
+
+        # --- File chooser, speed/pitch/position controls ---        # Connect signals for zooming when start/end sliders move
         self.filedialog = myGtk.FileChooserDialog(None, self, Gtk.FileChooserAction.OPEN)
         self.filedialog.connect("response", self.filechanged)
         self.filedialog.set_local_only(False)
@@ -148,14 +193,17 @@ class MainWindow(Gtk.Window):
         self.endchooser.scale.connect("button-release-event", self.seeked)
         self.endchooser.add_accelerator("clicked", self.accel_group, ord(']'), Gdk.ModifierType.CONTROL_MASK, Gtk.AccelFlags.VISIBLE)
         self.endchooser.add_accelerator("clicked", self.accel_group, ord(']'), 0, Gtk.AccelFlags.VISIBLE)
+        self.startchooser.scale.connect("value-changed", self.on_selection_changed)
+        self.endchooser.scale.connect("value-changed", self.on_selection_changed)
 
         self.vbox.pack_start(filechooserhbox, False, False, 0)
         self.vbox.pack_start(self.positionchooser, True, True, 0)
-        self.vbox.pack_start(myGtk.form([(_("Speed (times)"), self.speedchooser),
-            (_("Pitch (semitones)"), self.pitchchooser),
-            (_("Fine Pitch (cents)"), self.pitchchooser_fine),
-            (_("Start Position (seconds)"), self.startchooser),
-            (_("End Position (seconds)"), self.endchooser)
+        self.vbox.pack_start(myGtk.form([
+            ("Speed (times)", self.speedchooser),
+            ("Pitch (semitones)", self.pitchchooser),
+            ("Fine Pitch (cents)", self.pitchchooser_fine),
+            ("Start Position (seconds)", self.startchooser),
+            ("End Position (seconds)", self.endchooser)
         ]), False, False, 0)
 
         buttonbox = Gtk.HButtonBox()
@@ -199,6 +247,317 @@ class MainWindow(Gtk.Window):
         self.config_saving = False
         self.load_config()
 
+        # --- Periodic waveform refresh (for moving playback line) ---
+        from gi.repository import GLib
+
+        def refresh_waveform():
+            # Always repaint if window is visible
+            try:
+                if self.waveform_loaded and self.waveform_area.get_mapped():
+                    self.waveform_area.queue_draw()
+            except Exception as e:
+                logging.debug(f"refresh_waveform error: {e}")
+            return True
+
+        # Start after GTK mainloop is fully running (50ms delay)
+        GLib.timeout_add(50, lambda: GLib.timeout_add(16, refresh_waveform))
+
+    # ------------------------------------------------------------
+    # Waveform mouse interaction
+    # ------------------------------------------------------------
+    def on_waveform_click(self, widget, event):
+        if not self.waveform_loaded:
+            return False
+        width = widget.get_allocation().width
+        total = self.endchooser.get_adjustment().get_upper()
+        if total <= 0:
+            return False
+
+        # Convert time fraction to pixel X positions
+        start_frac = self.startchooser.get_value() / total
+        end_frac = self.endchooser.get_value() / total
+
+        def frac_to_x(f):
+            return (f - self.waveform_view_start) / (
+                self.waveform_view_end - self.waveform_view_start
+            ) * width
+
+        x1 = frac_to_x(start_frac)
+        x2 = frac_to_x(end_frac)
+
+        # Detect click proximity (within 5 px)
+        if abs(event.x - x1) < 5:
+            self.dragging_marker = "start"
+        elif abs(event.x - x2) < 5:
+            self.dragging_marker = "end"
+        else:
+            self.dragging_marker = None
+        return True
+
+    def on_waveform_motion(self, widget, event):
+        if not self.dragging_marker or not self.waveform_loaded:
+            return False
+
+        width = widget.get_allocation().width
+        total = self.endchooser.get_adjustment().get_upper()
+        frac = event.x / max(1, width)
+        abs_frac = self.waveform_view_start + frac * (
+            self.waveform_view_end - self.waveform_view_start
+        )
+        new_time = abs_frac * total
+
+        if self.dragging_marker == "start":
+            new_time = max(0.0, min(new_time, self.endchooser.get_value() - 0.01))
+            self.startchooser.set_value(new_time)
+        elif self.dragging_marker == "end":
+            new_time = min(total, max(new_time, self.startchooser.get_value() + 0.01))
+            self.endchooser.set_value(new_time)
+
+        self.on_selection_changed(None)
+        return True
+
+    def on_waveform_release(self, widget, event):
+        self.dragging_marker = None
+        return True
+
+    def on_waveform_scroll(self, widget, event):
+        """Zoom in/out centered on cursor position."""
+        if not self.waveform_loaded:
+            return False
+
+        zoom_factor = 0.8 if event.direction == Gdk.ScrollDirection.UP else 1.25
+
+        # Cursor fraction within the widget
+        width = widget.get_allocation().width
+        cursor_frac = event.x / max(1, width)
+
+        total_len = 1.0
+        view_center = self.waveform_view_start + cursor_frac * (self.waveform_view_end - self.waveform_view_start)
+        current_width = self.waveform_view_end - self.waveform_view_start
+        new_width = min(1.0, max(0.0001, current_width * zoom_factor))
+
+        self.waveform_view_start = max(0.0, view_center - new_width / 2.0)
+        self.waveform_view_end = min(1.0, self.waveform_view_start + new_width)
+
+        # Adjust if we go out of range
+        if self.waveform_view_end > 1.0:
+            shift = self.waveform_view_end - 1.0
+            self.waveform_view_start -= shift
+            self.waveform_view_end = 1.0
+        if self.waveform_view_start < 0.0:
+            self.waveform_view_end -= self.waveform_view_start
+            self.waveform_view_start = 0.0
+
+        self.waveform_area.queue_draw()
+        return True
+
+    def on_zoom_selection(self, button):
+        """Zoom so selection fits roughly from 10% to 90% of width."""
+        total = self.endchooser.get_adjustment().get_upper()
+        if total <= 0:
+            return
+
+        sel_start = self.startchooser.get_value() / total
+        sel_end = self.endchooser.get_value() / total
+        sel_width = max(0.0001, sel_end - sel_start)
+
+        # Compute zoomed region to place selection 10%-90% of view
+        view_width = sel_width / 0.8
+        view_center = (sel_start + sel_end) / 2.0
+
+        self.waveform_view_start = max(0.0, view_center - view_width / 2.0)
+        self.waveform_view_end = min(1.0, self.waveform_view_start + view_width)
+
+        if self.waveform_view_end > 1.0:
+            shift = self.waveform_view_end - 1.0
+            self.waveform_view_start -= shift
+            self.waveform_view_end = 1.0
+        if self.waveform_view_start < 0.0:
+            self.waveform_view_end -= self.waveform_view_start
+            self.waveform_view_start = 0.0
+
+        self.waveform_area.queue_draw()
+
+    def on_waveform_draw(self, widget, cr):
+        import cairo
+        if not self.waveform_loaded or self.waveform_samples is None:
+            return False
+
+        alloc = widget.get_allocation()
+        width, height = alloc.width, alloc.height
+        samples = self.waveform_samples
+        if len(samples) == 0:
+            return False
+
+        max_val = max(abs(samples.max()), abs(samples.min()))
+        if max_val == 0:
+            return False
+
+        import numpy as np
+        norm_samples = samples / max_val
+
+        # --- Compute zoomed region indices ---
+        total_len = len(norm_samples)
+        view_start_idx = int(self.waveform_view_start * total_len)
+        view_end_idx = int(self.waveform_view_end * total_len)
+        view_end_idx = min(view_end_idx, total_len - 1)
+
+        # --- Slice zoom region ---
+        visible = norm_samples[view_start_idx:view_end_idx]
+        if len(visible) < 2:
+            return False
+
+        # --- Resample to match widget width ---
+        # This keeps the zoomed region filling the entire view width
+        x = np.linspace(0, len(visible) - 1, width)
+        points = np.interp(x, np.arange(len(visible)), visible)
+
+        mid = height // 2
+        vertical_zoom = self.waveform_height_scale.get_value() if hasattr(self, "waveform_height_scale") else 1.0
+
+        # Apply vertical zoom (clamp so it doesn't overflow)
+        amp = int((height // 2 - 2) * vertical_zoom)
+
+        # Fill background to make waveform visible
+        cr.set_antialias(cairo.ANTIALIAS_NONE)
+        cr.set_source_rgb(0.1, 0.1, 0.1)
+        cr.rectangle(0, 0, width, height)
+        cr.fill()
+
+        # Draw waveform
+        cr.set_source_rgb(0.2, 0.6, 1.0)
+        cr.set_line_width(1)
+        cr.move_to(0, mid)
+        for x, y in enumerate(points):
+            cr.line_to(x, mid - int(y * amp))
+        cr.stroke()
+
+        # --- Draw selection area ---
+        total = self.endchooser.get_adjustment().get_upper()
+        if total > 0:
+            start_frac = self.startchooser.get_value() / total
+            end_frac = self.endchooser.get_value() / total
+
+            # Map absolute fractions to local visible window
+            def frac_to_x(f):
+                return (f - self.waveform_view_start) / (self.waveform_view_end - self.waveform_view_start) * width
+
+            x1 = frac_to_x(start_frac)
+            x2 = frac_to_x(end_frac)
+
+            # --- Selection (loop region) overlay ---
+            cr.set_source_rgba(0.9, 0.3, 0.4, 0.25)  # translucent pink/red
+            cr.rectangle(min(x1, x2), 0, abs(x2 - x1), height)
+            cr.fill()
+
+            try:
+                # Robust position/duration query from GStreamer
+                ok_pos, pos_ns = self.pipeline.playbin.query_position(Gst.Format.TIME)
+                ok_dur, dur_ns = self.pipeline.playbin.query_duration(Gst.Format.TIME)
+
+                if not ok_pos:
+                    pos_ns = 0
+                if not ok_dur or dur_ns == 0:
+                    # fall back to endchooser upper bound if duration not known yet
+                    dur_ns = int(self.endchooser.get_adjustment().get_upper() * Gst.SECOND)
+
+                # Convert to seconds
+                pos_time = pos_ns / Gst.SECOND
+                dur_time = dur_ns / Gst.SECOND
+                total_time = max(dur_time, 0.001)
+
+                pos_frac = min(1.0, max(0.0, pos_time / total_time))
+                logging.debug(f"Playback line: {pos_time:.2f}s / {total_time:.2f}s -> {pos_frac:.2%}")
+            except Exception as e:
+                logging.debug(f"Waveform position query failed: {e}")
+                pos_frac = 0.0
+
+            x_pos = frac_to_x(pos_frac)
+
+            # draw blue overlay for played region
+            if x_pos > 0:
+                cr.set_source_rgba(0.3, 0.6, 1.0, 0.25)
+                cr.rectangle(0, 0, min(x_pos, width), height)
+                cr.fill()
+
+                # --- Moving playback line ---
+                cr.set_source_rgb(1.0, 1.0, 1.0)  # white line
+                cr.set_line_width(1.0)
+                if 0 <= x_pos <= width:
+                    cr.move_to(x_pos, 0)
+                    cr.line_to(x_pos, height)
+                    cr.stroke()
+
+                # optional small circle marker at mid height
+                cr.arc(x_pos, mid, 2.0, 0, 2 * np.pi)
+                cr.fill()
+
+            # --- Start/End marker lines (contrasting color) ---
+            cr.set_source_rgb(1.0, 0.6, 0.0)  # bright orange markers
+            cr.set_line_width(1.2)
+            for xline in (x1, x2):
+                if 0 <= xline <= width:
+                    cr.move_to(xline, 0)
+                    cr.line_to(xline, height)
+            cr.stroke()
+
+        return False
+
+
+    def on_selection_changed(self, sender):
+        """Update waveform zoom when start or end slider moves."""
+        try:
+            total = self.endchooser.get_adjustment().get_upper()
+            start = self.startchooser.get_value()
+            end = self.endchooser.get_value()
+            if end <= start or total <= 0:
+                return
+
+            # Convert start/end to fractional range
+            sel_start = start / total
+            sel_end = end / total
+
+            # Center waveform view on selection, keeping it ~80% of window
+            sel_center = (sel_start + sel_end) / 2.0
+            sel_width = max(0.0001, sel_end - sel_start)
+
+            view_width = min(1.0, sel_width / 0.8)
+            view_start = max(0.0, sel_center - view_width / 2.0)
+            view_end = min(1.0, view_start + view_width)
+
+            # Adjust if we hit end boundary
+            if view_end > 1.0:
+                shift = view_end - 1.0
+                view_start = max(0.0, view_start - shift)
+                view_end = 1.0
+
+            self.waveform_view_start = view_start
+            self.waveform_view_end = view_end
+
+            self.waveform_area.queue_draw()
+        except Exception as e:
+            print(f"[ERROR] on_selection_changed: {e}")
+
+
+    def load_waveform(self, filename):
+        try:
+            from playitslowly.waveform import WaveformExtractor
+        except Exception as e:
+            logging.error(f"Could not import WaveformExtractor: {e}")
+            self.waveform_loaded = False
+            return
+
+        try:
+            extractor = WaveformExtractor(filename)
+            self.waveform_samples = extractor.get_samples(50000)
+            self.waveform_loaded = True
+        except Exception as e:
+            logging.error(f"Waveform load error: {e}")
+            self.waveform_samples = None
+            self.waveform_loaded = False
+
+        self.waveform_area.queue_draw()
+
     def speedpress(self, *args):
         self.speedchangeing = True
 
@@ -225,7 +584,7 @@ class MainWindow(Gtk.Window):
             recent_data.app_exec = "playitslowly"
             recent_data.mime_type = mime_type
             manager.add_full(uri, recent_data)
-            print(app_exec, mime_type)
+            logging.debug(f"Added to recents: {uri} ({mime_type})")
 
 
     def show_recent(self, sender=None):
@@ -255,7 +614,7 @@ class MainWindow(Gtk.Window):
         dialog.destroy()
 
     def set_uri(self, uri):
-        print(repr(uri))
+        logging.info(f"Opening: {uri}")
         self.filedialog.set_uri(uri)
         self.filechooser.set_uri(uri)
         self.filechanged(uri=uri)
@@ -277,13 +636,14 @@ class MainWindow(Gtk.Window):
         self.endchooser.set_value(1.0)
 
     def load_file_settings(self, filename):
-        print("load_file_settings", filename)
+        logging.debug(f"Loading file settings for: {filename}")
         self.add_recent(filename)
         if not self.config or not filename in self.config["files"]:
             self.reset_settings()
             self.pipeline.set_file(filename)
             self.pipeline.pause()
-            GObject.timeout_add(100, self.update_position)
+            from gi.repository import GLib
+            GLib.timeout_add(100, self.update_position)
             return
         settings = self.config["files"][filename]
         self.speedchooser.set_value(settings["speed"])
@@ -298,7 +658,8 @@ class MainWindow(Gtk.Window):
         """saves the config file with a delay"""
         if self.config_saving:
             return
-        GObject.timeout_add(1000, self.save_config_now)
+        from gi.repository import GLib
+        GLib.timeout_add(1000, self.save_config_now)
         self.config_saving = True
 
     def save_config_now(self):
@@ -339,9 +700,37 @@ class MainWindow(Gtk.Window):
         dialog.destroy()
 
     def filechanged(self, sender=None, response_id=Gtk.ResponseType.OK, uri=None):
-        print("file changed", uri)
-        if response_id != Gtk.ResponseType.OK:
+        filename = None
+        try:
+            filename = self.filedialog.get_filename()
+        except Exception as e:
+            print(f"[ERROR] filedialog.get_filename() failed: {e}")
+
+        # If not found, try the URI conversion
+        if not filename and uri:
+            try:
+                from gi.repository import Gio
+                gfile = Gio.File.new_for_uri(uri)
+                filename = gfile.get_path()
+            except Exception as e:
+                print(f"[ERROR] Failed to resolve URI to path: {e}")
+
+        # Final fallback: if sender is FileChooserButton
+        if not filename and hasattr(sender, "get_filename"):
+            try:
+                filename = sender.get_filename()
+            except Exception as e:
+                print(f"[ERROR] sender.get_filename() failed: {e}")
+
+        if not filename:
+            print("[ERROR] Could not resolve any valid filename, skipping waveform load")
             return
+
+        # --- Load waveform ---
+        try:
+            self.load_waveform(filename)
+        except Exception as e:
+            logging.error(f"Waveform load failed: {e}")
 
         self.play_button.set_sensitive(True)
         self.back_button.set_sensitive(True)
@@ -355,9 +744,8 @@ class MainWindow(Gtk.Window):
         if uri:
             self.load_file_settings(uri)
         else:
-            # for what ever reason filedialog.get_uri() is sometimes None until the
-            # mainloop ran through
-            GObject.timeout_add(1, lambda: self.load_file_settings(self.filedialog.get_uri()))
+            from gi.repository import GLib
+            GLib.timeout_add(1, lambda: self.load_file_settings(self.filedialog.get_uri()))
 
     def start_seeking(self, sender, foo):
         self.seeking = True
@@ -424,8 +812,11 @@ class MainWindow(Gtk.Window):
         position = self.pipeline.song_time(position)
         duration = self.pipeline.song_time(duration)
 
+        if duration is None or duration <= 0:
+            return self.play_button.get_active()
+
         if self.positionchooser.get_adjustment().get_property("upper") != duration:
-            self.positionchooser.set_range(0.0, duration)
+            self.positionchooser.set_range(0.0, max(0.001, duration))
             self.save_config()
 
         end_adjustment = self.endchooser.get_adjustment()
